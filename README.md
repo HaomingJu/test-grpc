@@ -1,6 +1,11 @@
 # proto文件生成
 
+```
+./generate_proto.sh
+```
 
+
+# 参考
 **消息类**的头文件和实现文件生成
 ```
 # workspace: ${CMAKE_SOURCE_DIR}
