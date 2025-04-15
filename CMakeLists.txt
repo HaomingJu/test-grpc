@@ -7,12 +7,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/install")
+set(CMAKE_BUILD_TYPE Debug)
 
 find_package(Protobuf REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_search_module(GRPCPP REQUIRED grpc++)
+pkg_search_module(OPENCV REQUIRED opencv4)
 
 include_directories(
+    ${OPENCV_INCLUDE_DIRS}
     ${CMAKE_SOURCE_DIR}/proto
     ${CMAKE_SOURCE_DIR}/PredictionClient)
 
@@ -22,6 +25,7 @@ add_subdirectory(PredictionClient)
 # Client
 add_executable(grpc-client client.cc)
 target_link_libraries(grpc-client PRIVATE
+    ${OPENCV_LIBRARIES}
     ${Protobuf_LIBRARIES} 
     ${GRPCPP_LIBRARIES}
     proto_tensorflow
@@ -31,13 +35,4 @@ install(TARGETS grpc-client
     RUNTIME DESTINATION bin
 )
 
-# Server
-#add_executable(grpc-server server.cc)
-#target_link_libraries(grpc-server PRIVATE
-    #${Protobuf_LIBRARIES} 
-    #${GRPC_LIBRARIES}
-    #proto_route_guide
-#)
-#install(TARGETS grpc-server
-    #RUNTIME DESTINATION bin
-#)
+install(FILES cat.jpg DESTINATION bin)

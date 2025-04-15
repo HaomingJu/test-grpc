@@ -4,6 +4,10 @@
 ./generate_proto.sh
 ```
 
+# TODO
+- [] 多个函数内是否可以公用一个ClientContext, 是否可以提升调用速度
+- [] KeepAlive功能是否默认开启
+
 
 # 参考
 **消息类**的头文件和实现文件生成

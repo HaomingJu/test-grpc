@@ -8,9 +8,13 @@
 #include <tensorflow_serving/apis/prediction_service.grpc.pb.h>
 #include <tensorflow_serving/apis/prediction_service.pb.h>
 
+#include <opencv2/opencv.hpp>
+
 using tensorflow::serving::GetModelMetadataRequest;
 using tensorflow::serving::GetModelMetadataResponse;
 using tensorflow::serving::PredictionService;
+using tensorflow::serving::PredictRequest;
+using tensorflow::serving::PredictResponse;
 
 class PredictionClient {
 public:
@@ -19,6 +23,7 @@ public:
 
 public:
   bool GetModelMetadata(GetModelMetadataResponse *response);
+  bool Predict(cv::Mat &&image, PredictResponse *response);
 
 private:
   std::unique_ptr<PredictionService::Stub> stub_{};
