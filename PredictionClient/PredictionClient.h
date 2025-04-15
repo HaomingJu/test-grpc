@@ -1,0 +1,27 @@
+#pragma once
+
+#include "tensorflow_serving/apis/get_model_metadata.pb.h"
+#include <grpc++/grpc++.h>
+
+#include <grpcpp/channel.h>
+#include <memory>
+#include <tensorflow_serving/apis/prediction_service.grpc.pb.h>
+#include <tensorflow_serving/apis/prediction_service.pb.h>
+
+using tensorflow::serving::GetModelMetadataRequest;
+using tensorflow::serving::GetModelMetadataResponse;
+using tensorflow::serving::PredictionService;
+
+class PredictionClient {
+public:
+  int Init(const std::string &target, const std::string &model_name = "dogcat");
+  void Final();
+
+public:
+  bool GetModelMetadata(GetModelMetadataResponse *response);
+
+private:
+  std::unique_ptr<PredictionService::Stub> stub_{};
+  std::shared_ptr<::grpc::Channel> channel_;
+  std::string model_name_;
+};
