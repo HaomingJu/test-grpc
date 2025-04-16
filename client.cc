@@ -1,3 +1,4 @@
+#include "opencv2/core/types.hpp"
 #include "opencv2/imgcodecs.hpp"
 #include "tensorflow_serving/apis/get_model_metadata.pb.h"
 #include "tensorflow_serving/apis/predict.pb.h"
@@ -24,6 +25,7 @@ int main(int argc, char **argv) {
     std::cerr << "image is empty" << std::endl;
     return 0;
   }
+  auto origin_image = image.clone();
 
   // 推理图片
   ::tensorflow::serving::PredictResponse response_predict;
@@ -38,7 +40,63 @@ int main(int argc, char **argv) {
                 << std::endl;
     }
 
+    float scale_x = 1920 / 640.0;
+    float scale_y = 1080 / 640.0;
     std::cout << "float_val_size: " << result.float_val_size() << std::endl;
+
+    const int offset_cx = 8400 * 0;
+    const int offset_cy = 8400 * 1;
+    const int offset_w = 8400 * 2;
+    const int offset_h = 8400 * 3;
+    const int offset_con_0 = 8400 * 4;
+    const int offset_con_1 = 8400 * 5;
+
+    for (int i = 0; i < 8400; ++i) {
+      float confidence_0 = result.float_val(offset_con_0 + i);
+      float confidence_1 = result.float_val(offset_con_1 + i);
+      if (confidence_0 > 0.80) {
+        std::cout << "One Cat..." << std::endl;
+        float cx = scale_x * result.float_val(offset_cx + i);
+        float cy = scale_y * result.float_val(offset_cy + i);
+        float w = scale_x * result.float_val(offset_w + i);
+        float h = scale_y * result.float_val(offset_h + i);
+        int x1 = int(cx - w / 2);
+        int x2 = int(cx + w / 2);
+        int y1 = int(cy - h / 2);
+        int y2 = int(cy + h / 2);
+        cv::rectangle(origin_image, cv::Point(x1, y1), cv::Point(x2, y2),
+                      cv::Scalar(0, 255, 0));
+
+      } else if (confidence_1 > 0.80) {
+        std::cout << "One Dog..." << std::endl;
+      } else {
+        continue;
+      }
+    }
+    cv::imwrite("./CPP_result.jpg", origin_image);
+
+    /*
+    for (int i = 0; i < result.float_val_size(); i += 6) {
+      float confidence_0 = result.float_val(i + 4);
+      float confidence_1 = result.float_val(i + 5);
+
+      if (confidence_0 > 0.9) {
+        // Cat
+          std::cout << "One Cat" << std::endl;
+
+      } else if (confidence_1 > 0.9) {
+        // Dog
+          std::cout << "One Dog" << std::endl;
+      } else {
+          continue;
+      }
+
+      //float cx = scale_x * result.float_val(i);
+      //float cy = scale_y * result.float_val(i + 1);
+      //float w = scale_x * result.float_val(i + 2);
+      //float h = scale_y * result.float_val(i + 3);
+    }
+    */
     // TODO: 根据阈值进行筛选
 
     // TODO: NMS算法
