@@ -63,7 +63,7 @@ int PredictionClient::GetModelMetadata(GetModelMetadataResponse *response) {
   return 0;
 }
 
-int PredictionClient::Predict(cv::Mat &&image) {
+int PredictionClient::Predict(cv::Mat &&image, float score /* = 0.5 */) {
 
   // TODO: 确定1和2对应的是w和h,分别是哪一个
   const int image_w = tensor_input_.tensor_shape().dim(1).size();
@@ -128,7 +128,10 @@ int PredictionClient::Predict(cv::Mat &&image) {
 
   const auto &result = response.outputs().at("output0");
 
-  this->drawResult(result, scale, padding_top, padding_left, image, "./cc.jpg");
+  auto filter_box =
+      this->filterBoxByScores(result, scale, padding_top, padding_left, score);
+
+  this->drawResult(filter_box, image, "dddd.jpg");
 
   return 0;
 }
@@ -183,19 +186,39 @@ void PredictionClient::letterbox_preprocess(const cv::Mat &src, cv::Mat &dest,
   *p_padding_left = padding_left;
 }
 
-int PredictionClient::drawResult(const tensorflow::TensorProto &result,
-                                 float scale, int padding_top, int padding_left,
+int PredictionClient::drawResult(const std::vector<BoxInfo> boxs_info,
                                  cv::Mat &origin_image,
                                  const std::string &output_image /* = {} */) {
 
-  const int image_w = tensor_input_.tensor_shape().dim(1).size();
-  const int image_h = tensor_input_.tensor_shape().dim(2).size();
+  for (const auto &box : boxs_info) {
+    cv::rectangle(origin_image, cv::Point(box.x1, box.y1),
+                  cv::Point(box.x2, box.y2), cv::Scalar(0, 255, 0));
+  }
+
+  if (!output_image.empty()) {
+    cv::imwrite(output_image, origin_image);
+    std::cout << "Write to image: " << output_image << std::endl;
+  }
+  return 0;
+}
+
+std::vector<int> PredictionClient::nms(const std::vector<cv::Rect> &boxes,
+                                       const std::vector<float> &scores,
+                                       float score_threshold /* = 0.5 */,
+                                       float nms_threshold /* = 0.5 */,
+                                       int method /* = 0 */) {
+  std::vector<int> indices;
+
+  return indices;
+}
+
+std::vector<BoxInfo> PredictionClient::filterBoxByScores(
+    const tensorflow::TensorProto &result, float scale, int padding_top,
+    int padding_left, float scores /* = 0.5 */) {
+  std::vector<BoxInfo> ret;
+
   const int result_class = tensor_output_.tensor_shape().dim(1).size();
   const int result_num = tensor_output_.tensor_shape().dim(2).size();
-
-  assert(result.float_val().size() == result_num * result_class * 1);
-  assert(image_w == image_h);
-
   const int offset_cx = result_num * 0;
   const int offset_cy = result_num * 1;
   const int offset_w = result_num * 2;
@@ -213,13 +236,13 @@ int PredictionClient::drawResult(const tensorflow::TensorProto &result,
 
     if (biggest_iter == class_ele.end()) {
       std::cerr << "Can find biggest iterator" << std::endl;
-      return -1;
+      return {};
     }
 
     int biggest_pos = std::distance(class_ele.begin(), biggest_iter);
     float biggest_value = class_ele[biggest_pos];
 
-    if (biggest_value > 0.50) {
+    if (biggest_value > scores) {
       float cx = (result.float_val(offset_cx + i) - padding_left) / scale;
       float cy = (result.float_val(offset_cy + i) - padding_top) / scale;
       float w = result.float_val(offset_w + i) / scale;
@@ -228,18 +251,11 @@ int PredictionClient::drawResult(const tensorflow::TensorProto &result,
       int x2 = int(cx + w / 2);
       int y1 = int(cy - h / 2);
       int y2 = int(cy + h / 2);
-
-      cv::rectangle(origin_image, cv::Point(x1, y1), cv::Point(x2, y2),
-                    cv::Scalar(0, 255, 0));
-      std::cout << "Get one rectangle" << std::endl;
+      ret.emplace_back(x1, y1, x2, y2, biggest_pos);
     } else {
       continue;
     }
   }
 
-  if (!output_image.empty()) {
-    cv::imwrite(output_image, origin_image);
-    std::cout << "Write to image: " << output_image << std::endl;
-  }
-  return 0;
+  return ret;
 }

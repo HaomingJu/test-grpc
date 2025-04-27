@@ -11,12 +11,23 @@
 #include <tensorflow_serving/apis/prediction_service.pb.h>
 
 #include <opencv2/opencv.hpp>
+#include <vector>
 
 using tensorflow::serving::GetModelMetadataRequest;
 using tensorflow::serving::GetModelMetadataResponse;
 using tensorflow::serving::PredictionService;
 using tensorflow::serving::PredictRequest;
 using tensorflow::serving::PredictResponse;
+
+struct BoxInfo {
+  BoxInfo(int x1_, int y1_, int x2_, int y2_, int label_)
+      : x1(x1_), y1(y1_), x2(x2_), y2(y2_) {}
+  int x1 = 0;
+  int y1 = 0;
+  int x2 = 0;
+  int y2 = 0;
+  int label = -1;
+};
 
 class PredictionClient {
 public:
@@ -29,7 +40,7 @@ public:
 
 public:
   int GetModelMetadata(GetModelMetadataResponse *response);
-  int Predict(cv::Mat &&image);
+  int Predict(cv::Mat &&image, float score = 0.5);
   int Post(); // 后处理
 
 private:
@@ -42,9 +53,17 @@ private:
                             int *padding_top, int *padding_left,
                             int target_size = 640);
 
-  int drawResult(const tensorflow::TensorProto &result, float scale,
-                 int padding_top, int padding_left, cv::Mat &origin_image,
+  int drawResult(const std::vector<BoxInfo> boxs_info, cv::Mat &origin_image,
                  const std::string &output_image = {});
+
+  std::vector<BoxInfo> filterBoxByScores(const tensorflow::TensorProto &result,
+                                         float scale, int padding_top,
+                                         int padding_left, float scores = 0.5);
+
+  std::vector<int> nms(const std::vector<cv::Rect> &boxes,
+                       const std::vector<float> &scores,
+                       float score_threshold = 0.5, float nms_threshold = 0.5,
+                       int method = 0);
 
 private:
   ::tensorflow::TensorProto tensor_input_;
