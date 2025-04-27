@@ -17,7 +17,8 @@ pkg_search_module(OPENCV REQUIRED opencv4)
 include_directories(
     ${OPENCV_INCLUDE_DIRS}
     ${CMAKE_SOURCE_DIR}/proto
-    ${CMAKE_SOURCE_DIR}/PredictionClient)
+    ${CMAKE_SOURCE_DIR}/PredictionClient
+    ${CMAKE_SOURCE_DIR}/include)
 
 add_subdirectory(proto)
 add_subdirectory(PredictionClient)
@@ -36,3 +37,5 @@ install(TARGETS grpc-client
 )
 
 install(FILES cat.jpg DESTINATION bin)
+install(FILES 11866.png DESTINATION bin)
+install(FILES 358.png DESTINATION bin)

@@ -1,15 +1,86 @@
 #include "opencv2/core/types.hpp"
 #include "opencv2/imgcodecs.hpp"
+#include "tensorflow/core/framework/tensor.pb.h"
 #include "tensorflow_serving/apis/get_model_metadata.pb.h"
 #include "tensorflow_serving/apis/predict.pb.h"
 #include <PredictionClient.h>
+#include <argparse.hpp>
 #include <iostream>
 #include <opencv2/opencv.hpp>
 
 int main(int argc, char **argv) {
   std::cout << "Hello from client!" << std::endl;
+  // 解析参数
+  ::argparse::ArgumentParser program("tensorflow");
+  program.add_argument("-i", "--input").required().help("input image path");
+  program.add_argument("-o", "--output").required().help("output image path");
+  program.add_argument("-m", "--model-name")
+      .required()
+      .help("yolo11 model name");
+  program.add_argument("-t", "--target")
+      .required()
+      .help("model server: ip:port");
+
+  // 1x640x640x3
+  program.add_argument("--tensor-input-dim")
+      .nargs(4)
+      .default_value(std::vector<int>{1, 640, 640, 3})
+      .scan<'i', int>();
+
+  // 1x15x8400
+  program.add_argument("--tensor-output-dim")
+      .nargs(3)
+      .default_value(std::vector<int>{1, 15, 840})
+      .scan<'i', int>();
+
+  ::tensorflow::TensorProto tensor_input, tensor_output;
+  std::string target, input_image, output_image, model_name;
+  std::vector<int> tensor_input_dim, tensor_output_dim;
+
+  try {
+    program.parse_args(argc, argv);
+
+    target = program.get("target");
+    input_image = program.get("input");
+    output_image = program.get("output");
+    model_name = program.get("model-name");
+    tensor_input_dim = program.get<std::vector<int>>("--tensor-input-dim");
+    tensor_output_dim = program.get<std::vector<int>>("--tensor-output-dim");
+
+    std::cout << "model target: " << target << std::endl;
+    std::cout << "input image: " << input_image << std::endl;
+    std::cout << "output image: " << output_image << std::endl;
+    std::cout << "model name: " << model_name << std::endl;
+    std::cout << "tensor_input_dim: " << tensor_input_dim[0] << "x"
+              << tensor_input_dim[1] << "x" << tensor_input_dim[2] << "x"
+              << tensor_input_dim[3] << std::endl;
+    std::cout << "tensor_output_dim: " << tensor_output_dim[0] << "x"
+              << tensor_output_dim[1] << "x" << tensor_output_dim[2]
+              << std::endl;
+
+  } catch (const std::exception &err) {
+    std::cerr << err.what() << std::endl;
+    std::cerr << program;
+    return 1;
+  }
+
+  tensor_input.set_dtype(tensorflow::DataType::DT_FLOAT);
+  tensor_input.mutable_tensor_shape()->add_dim()->set_size(tensor_input_dim[0]);
+  tensor_input.mutable_tensor_shape()->add_dim()->set_size(tensor_input_dim[1]);
+  tensor_input.mutable_tensor_shape()->add_dim()->set_size(tensor_input_dim[2]);
+  tensor_input.mutable_tensor_shape()->add_dim()->set_size(tensor_input_dim[3]);
+
+  tensor_output.set_dtype(tensorflow::DataType::DT_FLOAT);
+  tensor_output.mutable_tensor_shape()->add_dim()->set_size(
+      tensor_output_dim[0]);
+  tensor_output.mutable_tensor_shape()->add_dim()->set_size(
+      tensor_output_dim[1]);
+  tensor_output.mutable_tensor_shape()->add_dim()->set_size(
+      tensor_output_dim[2]);
+
   PredictionClient client;
-  int ret = client.Init("123.57.18.145:8500");
+  int ret = client.Init(target, std::move(tensor_input),
+                        std::move(tensor_output), model_name);
   if (ret) {
     std::cerr << "client init failed" << std::endl;
     return 0;
@@ -17,95 +88,25 @@ int main(int argc, char **argv) {
 
   // 测试模型可用性
   ::tensorflow::serving::GetModelMetadataResponse response_meta;
-  client.GetModelMetadata(&response_meta);
+  ret = client.GetModelMetadata(&response_meta);
+  if (ret) {
+    std::cerr << "get model meta info failed" << std::endl;
+    return 0;
+  }
 
   // 读取测试图片
-  auto image = cv::imread(argv[1]);
+  auto image = cv::imread(input_image);
   if (image.empty()) {
     std::cerr << "image is empty" << std::endl;
     return 0;
   }
-  auto origin_image = image.clone();
 
   // 推理图片
-  ::tensorflow::serving::PredictResponse response_predict;
-  auto status = client.Predict(std::move(image), &response_predict);
-
-  if (status) {
-    std::cout << "Predict end, return true" << std::endl;
-    const auto &result = response_predict.outputs().at("output0");
-    for (int i = 0; i < result.tensor_shape().dim_size(); ++i) {
-      std::cout << "name: " << result.tensor_shape().dim(i).name()
-                << " | sz: " << result.tensor_shape().dim(i).size()
-                << std::endl;
-    }
-
-    float scale_x = 1920 / 640.0;
-    float scale_y = 1080 / 640.0;
-    std::cout << "float_val_size: " << result.float_val_size() << std::endl;
-
-    const int offset_cx = 8400 * 0;
-    const int offset_cy = 8400 * 1;
-    const int offset_w = 8400 * 2;
-    const int offset_h = 8400 * 3;
-    const int offset_con_0 = 8400 * 4;
-    const int offset_con_1 = 8400 * 5;
-
-    for (int i = 0; i < 8400; ++i) {
-      float confidence_0 = result.float_val(offset_con_0 + i);
-      float confidence_1 = result.float_val(offset_con_1 + i);
-      if (confidence_0 > 0.80) {
-        std::cout << "One Cat..." << std::endl;
-        float cx = scale_x * result.float_val(offset_cx + i);
-        float cy = scale_y * result.float_val(offset_cy + i);
-        float w = scale_x * result.float_val(offset_w + i);
-        float h = scale_y * result.float_val(offset_h + i);
-        int x1 = int(cx - w / 2);
-        int x2 = int(cx + w / 2);
-        int y1 = int(cy - h / 2);
-        int y2 = int(cy + h / 2);
-        cv::rectangle(origin_image, cv::Point(x1, y1), cv::Point(x2, y2),
-                      cv::Scalar(0, 255, 0));
-
-      } else if (confidence_1 > 0.80) {
-        std::cout << "One Dog..." << std::endl;
-      } else {
-        continue;
-      }
-    }
-    cv::imwrite("./CPP_result.jpg", origin_image);
-
-    /*
-    for (int i = 0; i < result.float_val_size(); i += 6) {
-      float confidence_0 = result.float_val(i + 4);
-      float confidence_1 = result.float_val(i + 5);
-
-      if (confidence_0 > 0.9) {
-        // Cat
-          std::cout << "One Cat" << std::endl;
-
-      } else if (confidence_1 > 0.9) {
-        // Dog
-          std::cout << "One Dog" << std::endl;
-      } else {
-          continue;
-      }
-
-      //float cx = scale_x * result.float_val(i);
-      //float cy = scale_y * result.float_val(i + 1);
-      //float w = scale_x * result.float_val(i + 2);
-      //float h = scale_y * result.float_val(i + 3);
-    }
-    */
-    // TODO: 根据阈值进行筛选
-
-    // TODO: NMS算法
-
-    // TODO: 绘制图像
-
+  ret = client.Predict(std::move(image));
+  if (ret) {
+    std::cout << "Predict end, return -1" << std::endl;
   } else {
-    std::cout << "Predict end, return false" << std::endl;
+    std::cout << "Predict end, return 0" << std::endl;
   }
-
   return 0;
 }

@@ -5,16 +5,26 @@
 #include "tensorflow_serving/apis/get_model_metadata.pb.h"
 #include "tensorflow_serving/apis/predict.pb.h"
 #include "tensorflow_serving/apis/prediction_service.grpc.pb.h"
+#include <algorithm>
 #include <cassert>
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/support/status.h>
+#include <iterator>
+#include <vector>
 
 int PredictionClient::Init(const std::string &target,
+                           const ::tensorflow::TensorProto &&tensor_input,
+                           const ::tensorflow::TensorProto &&tensor_output,
                            const std::string &model_name /* = "dogcat" */) {
+
+  assert(tensor_input.tensor_shape().dim_size() == 4);
+  assert(tensor_output.tensor_shape().dim_size() == 3);
 
   // Step.0: Assign to value
   model_name_ = model_name;
+  tensor_input_.CopyFrom(tensor_input);
+  tensor_output_.CopyFrom(tensor_output);
 
   // Step.1: Create channel
   channel_ = ::grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
@@ -29,7 +39,7 @@ int PredictionClient::Init(const std::string &target,
   return 0;
 }
 
-bool PredictionClient::GetModelMetadata(GetModelMetadataResponse *response) {
+int PredictionClient::GetModelMetadata(GetModelMetadataResponse *response) {
 
   // Step.1: 构建必要上下文
   ::grpc::ClientContext context;
@@ -41,7 +51,7 @@ bool PredictionClient::GetModelMetadata(GetModelMetadataResponse *response) {
   auto status = stub_->GetModelMetadata(&context, request, response);
   if (!status.ok()) {
     std::cerr << "GetModelMetadata failed" << std::endl;
-    return false;
+    return -1;
   }
 
   // Step.3: 输出模型信息
@@ -50,10 +60,22 @@ bool PredictionClient::GetModelMetadata(GetModelMetadataResponse *response) {
             << std::endl
             << "model.signature_name: "
             << response->model_spec().signature_name() << std::endl;
-  return true;
+  return 0;
 }
 
-bool PredictionClient::Predict(cv::Mat &&image, PredictResponse *response) {
+int PredictionClient::Predict(cv::Mat &&image) {
+
+  // TODO: 确定1和2对应的是w和h,分别是哪一个
+  const int image_w = tensor_input_.tensor_shape().dim(1).size();
+  const int image_h = tensor_input_.tensor_shape().dim(2).size();
+  const int result_class = tensor_output_.tensor_shape().dim(1).size();
+  const int result_num = tensor_output_.tensor_shape().dim(2).size();
+
+  std::cout << "image_w: " << image_w << std::endl
+            << "image_h: " << image_h << std::endl
+            << "result_class: " << result_class << std::endl
+            << "result_num: " << result_num << std::endl;
+
   // Step.1: 构造必要上下文
   ::grpc::ClientContext context;
   PredictRequest request;
@@ -71,14 +93,13 @@ bool PredictionClient::Predict(cv::Mat &&image, PredictResponse *response) {
             << "image.elemSize: " << image.elemSize() << std::endl;
   assert(image.dims == 2);       // 维度为二维
   assert(image.channels() == 3); // 通道为3
+  assert(image_w == image_h);
 
-  // Step.3.1 尺寸调整
-  cv::resize(image, image, cv::Size(640, 640));
-  // Step.3.2 图像通道变换
-  cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
-  // Step.3.3 归一化
-  cv::Mat convert_mat(640, 640, CV_32FC3);
-  image.convertTo(convert_mat, CV_32FC3, 1.0f / 255.0);
+  cv::Mat convert_mat(image_w, image_h, CV_32FC3);
+  float scale = 0.0;
+  int padding_top = 0, padding_left = 0;
+  letterbox_preprocess(image, convert_mat, &scale, &padding_top, &padding_left,
+                       image_w);
 
   std::cout << "convert_mat.dims: " << convert_mat.dims << std::endl
             << "convert_mat.channels: " << convert_mat.channels() << std::endl
@@ -89,23 +110,136 @@ bool PredictionClient::Predict(cv::Mat &&image, PredictResponse *response) {
             << "convert_mat.elemSize: " << convert_mat.elemSize() << std::endl;
 
   // Step.4: 填充数据
-  ::tensorflow::TensorProto tensor_proto;
-  tensor_proto.set_dtype(tensorflow::DataType::DT_FLOAT);
-  tensor_proto.mutable_tensor_shape()->add_dim()->set_size(1);
-  tensor_proto.mutable_tensor_shape()->add_dim()->set_size(640);
-  tensor_proto.mutable_tensor_shape()->add_dim()->set_size(640);
-  tensor_proto.mutable_tensor_shape()->add_dim()->set_size(3);
-
+  ::tensorflow::TensorProto tensor_proto(tensor_input_);
   const size_t data_size = convert_mat.total() * convert_mat.elemSize();
   tensor_proto.set_tensor_content((char *)(convert_mat.data), data_size);
-
   auto &inputs = *request.mutable_inputs();
   inputs["images"].CopyFrom(tensor_proto);
 
-  auto status = stub_->Predict(&context, request, response);
+  // Step.5: 调用远程并返回
+  ::tensorflow::serving::PredictResponse response;
+  auto status = stub_->Predict(&context, request, &response);
 
-  return status.ok();
+  // Step.6: 处理返回结果
+  if (!status.ok()) {
+    std::cerr << "Predict failed." << std::endl;
+    return -1;
+  }
 
+  const auto &result = response.outputs().at("output0");
+
+  this->drawResult(result, scale, padding_top, padding_left, image, "./cc.jpg");
+
+  return 0;
 }
 
 void PredictionClient::Final() {}
+
+void PredictionClient::letterbox_preprocess(const cv::Mat &src, cv::Mat &dest,
+                                            float *p_scale, int *p_padding_top,
+                                            int *p_padding_left,
+                                            int target_size /* = 640 */) {
+
+  // 原始图像尺寸
+  int src_h = src.rows;
+  int src_w = src.cols;
+
+  // 计算缩放比例
+  float scale = std::min(static_cast<float>(target_size) / src_h,
+                         static_cast<float>(target_size) / src_w);
+
+  // 计算缩放后的新尺寸
+  int new_w = static_cast<int>(src_w * scale);
+  int new_h = static_cast<int>(src_h * scale);
+
+  // 执行缩放
+  cv::Mat resized;
+  cv::resize(src, resized, cv::Size(new_w, new_h), 0, 0, cv::INTER_LINEAR);
+
+  // 计算填充量
+  int padding_w = target_size - new_w;
+  int padding_h = target_size - new_h;
+
+  // 均分填充到两侧（右侧/底部可能有1像素的余数）
+  int padding_left = padding_w / 2;
+  int padding_right = padding_w - padding_left;
+  int padding_top = padding_h / 2;
+  int padding_bottom = padding_h - padding_top;
+
+  // 创建目标图像并填充
+  cv::Mat padded = cv::Mat::zeros(target_size, target_size, src.type());
+  padded.setTo(cv::Scalar(114, 114, 114)); // 填充灰色
+
+  // 将缩放后的图像复制到中心
+  resized.copyTo(padded(cv::Rect(padding_left, padding_top, new_w, new_h)));
+
+  // 转换为RGB格式（如果需要）
+  cv::cvtColor(padded, padded, cv::COLOR_BGR2RGB);
+
+  padded.convertTo(dest, CV_32FC3, 1.0f / 255.0);
+
+  *p_scale = scale;
+  *p_padding_top = padding_top;
+  *p_padding_left = padding_left;
+}
+
+int PredictionClient::drawResult(const tensorflow::TensorProto &result,
+                                 float scale, int padding_top, int padding_left,
+                                 cv::Mat &origin_image,
+                                 const std::string &output_image /* = {} */) {
+
+  const int image_w = tensor_input_.tensor_shape().dim(1).size();
+  const int image_h = tensor_input_.tensor_shape().dim(2).size();
+  const int result_class = tensor_output_.tensor_shape().dim(1).size();
+  const int result_num = tensor_output_.tensor_shape().dim(2).size();
+
+  assert(result.float_val().size() == result_num * result_class * 1);
+  assert(image_w == image_h);
+
+  const int offset_cx = result_num * 0;
+  const int offset_cy = result_num * 1;
+  const int offset_w = result_num * 2;
+  const int offset_h = result_num * 3;
+
+  for (int i = 0; i < result_num; ++i) {
+    std::vector<float> class_ele;
+    class_ele.reserve(32);
+
+    for (int j = 4; j < result_class; ++j) {
+      class_ele.push_back(result.float_val(result_num * j + i));
+    }
+
+    auto biggest_iter = std::max_element(class_ele.begin(), class_ele.end());
+
+    if (biggest_iter == class_ele.end()) {
+      std::cerr << "Can find biggest iterator" << std::endl;
+      return -1;
+    }
+
+    int biggest_pos = std::distance(class_ele.begin(), biggest_iter);
+    float biggest_value = class_ele[biggest_pos];
+
+    if (biggest_value > 0.50) {
+      float cx = (result.float_val(offset_cx + i) - padding_left) / scale;
+      float cy = (result.float_val(offset_cy + i) - padding_top) / scale;
+      float w = result.float_val(offset_w + i) / scale;
+      float h = result.float_val(offset_h + i) / scale;
+      int x1 = int(cx - w / 2);
+      int x2 = int(cx + w / 2);
+      int y1 = int(cy - h / 2);
+      int y2 = int(cy + h / 2);
+
+      cv::rectangle(origin_image, cv::Point(x1, y1), cv::Point(x2, y2),
+                    cv::Scalar(0, 255, 0));
+      std::cout << "Get one rectangle" << std::endl;
+    } else {
+      continue;
+    }
+  }
+
+  if (!output_image.empty()) {
+    cv::imwrite(output_image, origin_image);
+    std::cout << "Write to image: " << output_image << std::endl;
+  }
+  return 0;
+}
