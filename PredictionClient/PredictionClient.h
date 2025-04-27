@@ -20,13 +20,17 @@ using tensorflow::serving::PredictRequest;
 using tensorflow::serving::PredictResponse;
 
 struct BoxInfo {
-  BoxInfo(int x1_, int y1_, int x2_, int y2_, int label_)
-      : x1(x1_), y1(y1_), x2(x2_), y2(y2_) {}
+  BoxInfo(int x1_, int y1_, int x2_, int y2_, int label_, float score_,
+          float areas_)
+      : x1(x1_), y1(y1_), x2(x2_), y2(y2_), label(label_), score(score_),
+        areas(areas_) {}
   int x1 = 0;
   int y1 = 0;
   int x2 = 0;
   int y2 = 0;
-  int label = -1;
+  int label = -1;    // 分类
+  float score = 0.0; // label对应的分数, 为最大值
+  float areas = 0.0; // 面积
 };
 
 class PredictionClient {
@@ -60,10 +64,10 @@ private:
                                          float scale, int padding_top,
                                          int padding_left, float scores = 0.5);
 
-  std::vector<int> nms(const std::vector<cv::Rect> &boxes,
-                       const std::vector<float> &scores,
-                       float score_threshold = 0.5, float nms_threshold = 0.5,
-                       int method = 0);
+  std::vector<BoxInfo> nms(std::vector<BoxInfo> &boxes,
+                           float nms_threshold = 0.5);
+
+  float iou(const BoxInfo &box1, const BoxInfo &box2);
 
 private:
   ::tensorflow::TensorProto tensor_input_;

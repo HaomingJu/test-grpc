@@ -11,6 +11,7 @@
 #include <grpcpp/create_channel.h>
 #include <grpcpp/support/status.h>
 #include <iterator>
+#include <numeric>
 #include <vector>
 
 int PredictionClient::Init(const std::string &target,
@@ -131,7 +132,9 @@ int PredictionClient::Predict(cv::Mat &&image, float score /* = 0.5 */) {
   auto filter_box =
       this->filterBoxByScores(result, scale, padding_top, padding_left, score);
 
-  this->drawResult(filter_box, image, "dddd.jpg");
+  auto obj_box = this->nms(filter_box);
+
+  this->drawResult(obj_box, image, "dddd.jpg");
 
   return 0;
 }
@@ -191,6 +194,7 @@ int PredictionClient::drawResult(const std::vector<BoxInfo> boxs_info,
                                  const std::string &output_image /* = {} */) {
 
   for (const auto &box : boxs_info) {
+    std::cout << "Draw: " << box.label << " | " << box.score << std::endl;
     cv::rectangle(origin_image, cv::Point(box.x1, box.y1),
                   cv::Point(box.x2, box.y2), cv::Scalar(0, 255, 0));
   }
@@ -202,14 +206,35 @@ int PredictionClient::drawResult(const std::vector<BoxInfo> boxs_info,
   return 0;
 }
 
-std::vector<int> PredictionClient::nms(const std::vector<cv::Rect> &boxes,
-                                       const std::vector<float> &scores,
-                                       float score_threshold /* = 0.5 */,
-                                       float nms_threshold /* = 0.5 */,
-                                       int method /* = 0 */) {
-  std::vector<int> indices;
+std::vector<BoxInfo> PredictionClient::nms(std::vector<BoxInfo> &boxes,
+                                           float nms_threshold /* = 0.5 */
+) {
 
-  return indices;
+  std::vector<BoxInfo> result;
+  std::vector<size_t> indices(boxes.size());
+  std::iota(indices.begin(), indices.end(), 0);
+
+  std::sort(boxes.begin(), boxes.end(),
+            [this](const BoxInfo &lhs, const BoxInfo &rhs) {
+              return lhs.score > rhs.score;
+            });
+
+  for (auto &box : boxes) {
+    while (!indices.empty()) {
+      size_t best_idx = indices[0];
+      result.push_back(boxes[best_idx]);
+      // 移除已选中的框
+      indices.erase(indices.begin());
+      indices.erase(std::remove_if(indices.begin(), indices.end(),
+                                   [&](size_t i) {
+                                     return iou(boxes[best_idx], boxes[i]) >
+                                            nms_threshold;
+                                   }),
+                    indices.end());
+    }
+  }
+
+  return result;
 }
 
 std::vector<BoxInfo> PredictionClient::filterBoxByScores(
@@ -251,11 +276,33 @@ std::vector<BoxInfo> PredictionClient::filterBoxByScores(
       int x2 = int(cx + w / 2);
       int y1 = int(cy - h / 2);
       int y2 = int(cy + h / 2);
-      ret.emplace_back(x1, y1, x2, y2, biggest_pos);
+      int areas = (y2 - y1) * (x2 - x1);
+      ret.emplace_back(x1, y1, x2, y2, biggest_pos, biggest_value, areas);
     } else {
       continue;
     }
   }
 
   return ret;
+}
+
+float PredictionClient::iou(const BoxInfo &box1, const BoxInfo &box2) {
+  // Calculate intersection area
+  float x1 = std::max(box1.x1, box2.x1);
+  float y1 = std::max(box1.y1, box2.y1);
+  float x2 = std::min(box1.x2, box2.x2);
+  float y2 = std::min(box1.y2, box2.y2);
+
+  float intersection_area = std::max(0.0f, x2 - x1) * std::max(0.0f, y2 - y1);
+
+  // Calculate union area
+  float box1_area = (box1.x2 - box1.x1) * (box1.y2 - box1.y1);
+  float box2_area = (box2.x2 - box2.x1) * (box2.y2 - box2.y1);
+  float union_area = box1_area + box2_area - intersection_area;
+
+  // Avoid division by zero
+  if (union_area == 0.0f)
+    return 0.0f;
+
+  return intersection_area / union_area;
 }
