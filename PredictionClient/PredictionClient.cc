@@ -7,6 +7,7 @@
 #include "tensorflow_serving/apis/prediction_service.grpc.pb.h"
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/support/status.h>
@@ -135,7 +136,9 @@ int PredictionClient::Predict(cv::Mat &&image, float score /* = 0.5 */,
 
   auto obj_box = this->nms(filter_box);
 
-  this->drawResult(obj_box, image, save_path);
+  double amount = this->objToDouble(obj_box);
+
+  this->drawResult(obj_box, image, save_path, amount);
 
   return 0;
 }
@@ -198,7 +201,9 @@ void PredictionClient::letterbox_preprocess(const cv::Mat &src, cv::Mat &dest,
 
 int PredictionClient::drawResult(std::vector<BoxInfo> &boxs_info,
                                  cv::Mat &origin_image,
-                                 const std::string &output_image /* = {} */) {
+                                 const std::string &output_image /* = {} */,
+                                 double amount /* = 0.0f */
+) {
 
   const int image_w = tensor_input_.tensor_shape().dim(1).size();
   const int image_h = tensor_input_.tensor_shape().dim(2).size();
@@ -210,11 +215,6 @@ int PredictionClient::drawResult(std::vector<BoxInfo> &boxs_info,
   letterbox_preprocess(origin_image, convert_mat, &scale, &padding_top,
                        &padding_left, image_w, false);
 
-  std::sort(boxs_info.begin(), boxs_info.end(),
-            [this](const BoxInfo &l, const BoxInfo &r) {
-              return (l.x1 + l.x2) < (r.x1 + r.x2);
-            });
-
   int pos_y = 20;
   for (const auto &box : boxs_info) {
     char s[64] = {'\0'};
@@ -224,6 +224,10 @@ int PredictionClient::drawResult(std::vector<BoxInfo> &boxs_info,
     cv::rectangle(convert_mat, cv::Point(box.x1, box.y1),
                   cv::Point(box.x2, box.y2), cv::Scalar(255, 0, 0));
   }
+  char s2[64] = {'\0'};
+  sprintf(s2, "Money: %10.4f", amount);
+  cv::putText(convert_mat, s2, cv::Point(50, 20), cv::FONT_HERSHEY_PLAIN, 1.0,
+              cv::Scalar(0, 255, 0));
 
   if (!output_image.empty()) {
     cv::imwrite(output_image, convert_mat);
@@ -302,8 +306,7 @@ std::vector<BoxInfo> PredictionClient::filterBoxByScores(
       int x2 = int(cx + w / 2);
       int y1 = int(cy - h / 2);
       int y2 = int(cy + h / 2);
-      int areas = (y2 - y1) * (x2 - x1);
-      ret.emplace_back(x1, y1, x2, y2, biggest_pos, biggest_value, areas);
+      ret.emplace_back(x1, y1, x2, y2, biggest_pos, biggest_value, y2 - y1);
     } else {
       continue;
     }
@@ -331,4 +334,61 @@ float PredictionClient::iou(const BoxInfo &box1, const BoxInfo &box2) {
     return 0.0f;
 
   return intersection_area / union_area;
+}
+
+double PredictionClient::objToDouble(std::vector<BoxInfo> &boxs_info) {
+  std::sort(boxs_info.begin(), boxs_info.end(),
+            [this](const BoxInfo &l, const BoxInfo &r) {
+              return (l.x1 + l.x2) < (r.x1 + r.x2);
+            });
+
+  if (boxs_info.size() < 2) {
+    std::cerr << "objToDouble boxs_info.size: " << boxs_info.size();
+    return 0.0;
+  }
+
+  std::vector<int> part_integer;
+  std::vector<int> part_decimal;
+  part_integer.reserve(8);
+  part_decimal.reserve(4);
+
+  int part_integer_base = boxs_info.begin()->height;
+  int part_decimal_base = boxs_info.rbegin()->height;
+
+  for (const auto &ele : boxs_info) {
+    if (ele.label > 9) { // 除了0-9, 其他的全部舍弃
+      continue;
+    }
+
+    float proportion_integer = float(ele.height) / part_integer_base;
+    float proportion_decimal = float(ele.height) / part_decimal_base;
+
+    std::cout << ">>> " << ele.label << " " << proportion_integer << " "
+              << proportion_decimal << std::endl;
+
+    if (proportion_integer > 0.9 && proportion_integer < 1.2) {
+      part_integer.push_back(ele.label);
+    }
+
+    if (proportion_decimal > 0.9 && proportion_decimal < 1.2) {
+      part_decimal.push_back(ele.label);
+    }
+  }
+
+  // 组合整数部分
+  int sum_integer = 0;
+  for (int i = part_integer.size() - 1; i >= 0; --i) {
+    sum_integer +=
+        part_integer[i] * std::pow<int>(10, part_integer.size() - 1 - i);
+  }
+  std::cout << "sum_integer: " << sum_integer << std::endl;
+
+  // 组合小数部分
+  double sum_decimal = 0.0f;
+  for (int i = 0; i < part_decimal.size(); ++i) {
+    sum_decimal += part_decimal[i] * std::pow<double>(0.1f, i + 1);
+  }
+  std::cout << "sum_decimal: " << sum_decimal << std::endl;
+
+  return double(sum_integer + sum_decimal);
 }

@@ -21,16 +21,16 @@ using tensorflow::serving::PredictResponse;
 
 struct BoxInfo {
   BoxInfo(int x1_, int y1_, int x2_, int y2_, int label_, float score_,
-          float areas_)
+          int height_)
       : x1(x1_), y1(y1_), x2(x2_), y2(y2_), label(label_), score(score_),
-        areas(areas_) {}
+        height(height_) {}
   int x1 = 0;
   int y1 = 0;
   int x2 = 0;
   int y2 = 0;
   int label = -1;    // 分类
   float score = 0.0; // label对应的分数, 为最大值
-  float areas = 0.0; // 面积
+  int height = 0;    // 高度
 };
 
 class PredictionClient {
@@ -58,7 +58,7 @@ private:
                             int target_size = 640, bool normalization = true);
 
   int drawResult(std::vector<BoxInfo> &boxs_info, cv::Mat &origin_image,
-                 const std::string &output_image = {});
+                 const std::string &output_image = {}, double amount = 0.0f);
 
   std::vector<BoxInfo> filterBoxByScores(const tensorflow::TensorProto &result,
                                          float scale, int padding_top,
@@ -68,6 +68,8 @@ private:
                            float nms_threshold = 0.5);
 
   float iou(const BoxInfo &box1, const BoxInfo &box2);
+
+  double objToDouble(std::vector<BoxInfo> &boxes);
 
 private:
   ::tensorflow::TensorProto tensor_input_;
