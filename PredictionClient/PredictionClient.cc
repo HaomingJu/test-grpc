@@ -197,7 +197,7 @@ int PredictionClient::drawResult(const std::vector<BoxInfo> boxs_info,
   for (const auto &box : boxs_info) {
     std::cout << "Draw: " << box.label << " | " << box.score << std::endl;
     cv::rectangle(origin_image, cv::Point(box.x1, box.y1),
-                  cv::Point(box.x2, box.y2), cv::Scalar(0, 255, 0));
+                  cv::Point(box.x2, box.y2), cv::Scalar(255, 0, 0));
   }
 
   if (!output_image.empty()) {
