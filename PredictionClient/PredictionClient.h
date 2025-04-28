@@ -44,8 +44,7 @@ public:
 
 public:
   int GetModelMetadata(GetModelMetadataResponse *response);
-  int Predict(cv::Mat &&image, float score = 0.5);
-  int Post(); // 后处理
+  int Predict(cv::Mat &&image, float score = 0.5, const std::string& save_path = {});
 
 private:
   std::unique_ptr<PredictionService::Stub> stub_{};

@@ -102,7 +102,7 @@ int main(int argc, char **argv) {
   }
 
   // 推理图片
-  ret = client.Predict(std::move(image));
+  ret = client.Predict(std::move(image), 0.5, output_image);
   if (ret) {
     std::cout << "Predict end, return -1" << std::endl;
   } else {

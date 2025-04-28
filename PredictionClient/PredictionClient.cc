@@ -64,7 +64,8 @@ int PredictionClient::GetModelMetadata(GetModelMetadataResponse *response) {
   return 0;
 }
 
-int PredictionClient::Predict(cv::Mat &&image, float score /* = 0.5 */) {
+int PredictionClient::Predict(cv::Mat &&image, float score /* = 0.5 */,
+                              const std::string &save_path /* = {} */) {
 
   // TODO: 确定1和2对应的是w和h,分别是哪一个
   const int image_w = tensor_input_.tensor_shape().dim(1).size();
@@ -134,7 +135,7 @@ int PredictionClient::Predict(cv::Mat &&image, float score /* = 0.5 */) {
 
   auto obj_box = this->nms(filter_box);
 
-  this->drawResult(obj_box, image, "dddd.jpg");
+  this->drawResult(obj_box, image, save_path);
 
   return 0;
 }
