@@ -145,7 +145,9 @@ void PredictionClient::Final() {}
 void PredictionClient::letterbox_preprocess(const cv::Mat &src, cv::Mat &dest,
                                             float *p_scale, int *p_padding_top,
                                             int *p_padding_left,
-                                            int target_size /* = 640 */) {
+                                            int target_size /* = 640 */,
+                                            bool normalization /* = true */
+) {
 
   // 原始图像尺寸
   int src_h = src.rows;
@@ -183,7 +185,11 @@ void PredictionClient::letterbox_preprocess(const cv::Mat &src, cv::Mat &dest,
   // 转换为RGB格式（如果需要）
   cv::cvtColor(padded, padded, cv::COLOR_BGR2RGB);
 
-  padded.convertTo(dest, CV_32FC3, 1.0f / 255.0);
+  if (normalization) {
+    padded.convertTo(dest, CV_32FC3, 1.0f / 255.0);
+  } else {
+    padded.convertTo(dest, CV_32FC3, 1.0f);
+  }
 
   *p_scale = scale;
   *p_padding_top = padding_top;
@@ -194,14 +200,24 @@ int PredictionClient::drawResult(const std::vector<BoxInfo> boxs_info,
                                  cv::Mat &origin_image,
                                  const std::string &output_image /* = {} */) {
 
+  const int image_w = tensor_input_.tensor_shape().dim(1).size();
+  const int image_h = tensor_input_.tensor_shape().dim(2).size();
+
+  cv::Mat convert_mat(image_w, image_h, origin_image.type());
+  float scale = 0.0;
+  int padding_top = 0, padding_left = 0;
+
+  letterbox_preprocess(origin_image, convert_mat, &scale, &padding_top,
+                       &padding_left, image_w, false);
+
   for (const auto &box : boxs_info) {
     std::cout << "Draw: " << box.label << " | " << box.score << std::endl;
-    cv::rectangle(origin_image, cv::Point(box.x1, box.y1),
+    cv::rectangle(convert_mat, cv::Point(box.x1, box.y1),
                   cv::Point(box.x2, box.y2), cv::Scalar(255, 0, 0));
   }
 
   if (!output_image.empty()) {
-    cv::imwrite(output_image, origin_image);
+    cv::imwrite(output_image, convert_mat);
     std::cout << "Write to image: " << output_image << std::endl;
   }
   return 0;
@@ -269,10 +285,10 @@ std::vector<BoxInfo> PredictionClient::filterBoxByScores(
     float biggest_value = class_ele[biggest_pos];
 
     if (biggest_value > scores) {
-      float cx = (result.float_val(offset_cx + i) - padding_left) / scale;
-      float cy = (result.float_val(offset_cy + i) - padding_top) / scale;
-      float w = result.float_val(offset_w + i) / scale;
-      float h = result.float_val(offset_h + i) / scale;
+      float cx = result.float_val(offset_cx + i);
+      float cy = result.float_val(offset_cy + i);
+      float w = result.float_val(offset_w + i);
+      float h = result.float_val(offset_h + i);
       int x1 = int(cx - w / 2);
       int x2 = int(cx + w / 2);
       int y1 = int(cy - h / 2);

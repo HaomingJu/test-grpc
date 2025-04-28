@@ -44,7 +44,8 @@ public:
 
 public:
   int GetModelMetadata(GetModelMetadataResponse *response);
-  int Predict(cv::Mat &&image, float score = 0.5, const std::string& save_path = {});
+  int Predict(cv::Mat &&image, float score = 0.5,
+              const std::string &save_path = {});
 
 private:
   std::unique_ptr<PredictionService::Stub> stub_{};
@@ -54,7 +55,7 @@ private:
 private:
   void letterbox_preprocess(const cv::Mat &src, cv::Mat &dest, float *scale,
                             int *padding_top, int *padding_left,
-                            int target_size = 640);
+                            int target_size = 640, bool normalization = true);
 
   int drawResult(const std::vector<BoxInfo> boxs_info, cv::Mat &origin_image,
                  const std::string &output_image = {});
