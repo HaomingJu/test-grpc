@@ -57,7 +57,7 @@ private:
                             int *padding_top, int *padding_left,
                             int target_size = 640, bool normalization = true);
 
-  int drawResult(const std::vector<BoxInfo> boxs_info, cv::Mat &origin_image,
+  int drawResult(std::vector<BoxInfo> &boxs_info, cv::Mat &origin_image,
                  const std::string &output_image = {});
 
   std::vector<BoxInfo> filterBoxByScores(const tensorflow::TensorProto &result,

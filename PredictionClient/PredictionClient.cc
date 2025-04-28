@@ -196,7 +196,7 @@ void PredictionClient::letterbox_preprocess(const cv::Mat &src, cv::Mat &dest,
   *p_padding_left = padding_left;
 }
 
-int PredictionClient::drawResult(const std::vector<BoxInfo> boxs_info,
+int PredictionClient::drawResult(std::vector<BoxInfo> &boxs_info,
                                  cv::Mat &origin_image,
                                  const std::string &output_image /* = {} */) {
 
@@ -210,8 +210,17 @@ int PredictionClient::drawResult(const std::vector<BoxInfo> boxs_info,
   letterbox_preprocess(origin_image, convert_mat, &scale, &padding_top,
                        &padding_left, image_w, false);
 
+  std::sort(boxs_info.begin(), boxs_info.end(),
+            [this](const BoxInfo &l, const BoxInfo &r) {
+              return (l.x1 + l.x2) < (r.x1 + r.x2);
+            });
+
+  int pos_y = 20;
   for (const auto &box : boxs_info) {
-    std::cout << "Draw: " << box.label << " | " << box.score << std::endl;
+    char s[64] = {'\0'};
+    sprintf(s, "Label: %d | %10.3f", box.label, box.score);
+    cv::putText(convert_mat, s, cv::Point(50, pos_y += 20),
+                cv::FONT_HERSHEY_PLAIN, 1.0, cv::Scalar(255, 0, 0));
     cv::rectangle(convert_mat, cv::Point(box.x1, box.y1),
                   cv::Point(box.x2, box.y2), cv::Scalar(255, 0, 0));
   }
