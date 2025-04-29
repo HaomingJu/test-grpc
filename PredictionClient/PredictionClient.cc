@@ -37,6 +37,10 @@ int PredictionClient::Init(const std::string &target,
 
   // Step.2: Create stub
   stub_ = ::tensorflow::serving::PredictionService::NewStub(channel_);
+  if (!stub_) {
+    std::cerr << "Create new stub failed" << std::endl;
+    return -1;
+  }
 
   return 0;
 }
@@ -67,6 +71,11 @@ int PredictionClient::GetModelMetadata(GetModelMetadataResponse *response) {
 
 int PredictionClient::Predict(cv::Mat &&image, float score /* = 0.5 */,
                               const std::string &save_path /* = {} */) {
+
+  if (image.empty()) {
+    std::cerr << "image is empty" << std::endl;
+    return -1;
+  }
 
   // TODO: 确定1和2对应的是w和h,分别是哪一个
   const int image_w = tensor_input_.tensor_shape().dim(1).size();
